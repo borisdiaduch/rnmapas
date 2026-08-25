@@ -77,18 +77,6 @@
     margin-bottom: 4px;
     padding:0;
   }
-  .style-select{
-    width: 100%;
-    padding: 7px 9px;
-    border: 1px solid var(--panel-border);
-    border-radius: 6px;
-    font-size: 13px;
-    background: var(--bg);
-    color: var(--text);
-    cursor: pointer;
-  }
-  .style-select:focus{ outline: none; border-color: var(--accent); }
-
   #coord-form{ display:flex; flex-direction: column; gap: 6px; width: 100%; }
   .coord-input-wrap{ position: relative; width: 100%; }
   #coord-input{
@@ -260,17 +248,6 @@
 
     <hr>
 
-    <fieldset>
-      <legend>Estilo base</legend>
-      <select class="style-select" id="style-select">
-        <option value="standard" selected>Estándar</option>
-        <option value="satellite">Satelital</option>
-        <option value="opentopo">OpenTopoMap (Raster)</option>
-      </select>
-    </fieldset>
-
-    <hr>
-
     <div class="subsection collapsed" id="layers-section">
       <div class="subsection-header" id="layers-toggle">
         <span>Capas</span>
@@ -332,7 +309,7 @@
     </div>
 
     <div class="hint">
-      Datos: OpenStreetMap contributors (vía OpenFreeMap y OpenTopoMap), Esri World Imagery, AWS Terrain Tiles, UNEP-WCMC/IUCN (WDPA).
+      Datos: OpenStreetMap contributors (vía OpenFreeMap), UNEP-WCMC/IUCN (WDPA).
     </div>
   </div>
 </div>
@@ -355,46 +332,10 @@
 
   const LIBERTY_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
-  const SATELLITE_STYLE = {
-    version: 8,
-    sources: {
-      'esri-satellite': {
-        type: 'raster',
-        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256,
-        attribution: 'Imagery © Esri, Maxar, Earthstar Geographics'
-      }
-    },
-    layers: [{ id: 'esri-satellite-layer', type: 'raster', source: 'esri-satellite' }]
-  };
-
-  const OPENTOPO_STYLE = {
-    version: 8,
-    sources: {
-      'opentopo': {
-        type: 'raster',
-        tiles: [
-          'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
-          'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
-          'https://c.tile.opentopomap.org/{z}/{x}/{y}.png'
-        ],
-        tileSize: 256,
-        attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)'
-      }
-    },
-    layers: [{ id: 'opentopo-layer', type: 'raster', source: 'opentopo' }]
-  };
-
-  function styleForKey(key){
-    if (key === 'satellite') return SATELLITE_STYLE;
-    if (key === 'opentopo') return OPENTOPO_STYLE;
-    return LIBERTY_URL;
-  }
-
   const PROTECTED_SOURCE_ID = 'protected-areas-src';
   const PROTECTED_LAYER_ID = 'protected-areas-layer';
 
-  // Estado de los toggles, se preserva al cambiar de estilo base
+  // Estado de los toggles
   const state = {
     labels: true,
     roads: true,
@@ -525,13 +466,6 @@
       state[toggleMap[id]] = e.target.checked;
       applyLayerVisibility();
     });
-  });
-
-  document.getElementById('style-select').addEventListener('change', (e) => {
-    isSwitching = true;
-    showStatus('Cambiando de estilo…', false);
-    armSwitchWatchdog();
-    map.setStyle(styleForKey(e.target.value));
   });
 
   // --- Coordenadas: campo único "lat, lon" + botón para borrar ---
