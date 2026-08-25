@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAPAS — Diario RÍO NEGRO</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" />
+<style>
+  :root{
+    --bg: #f4f2ec;
+    --panel: #ffffff;
+    --panel-border: #dedad0;
+    --text: #2b2a25;
+    --muted: #7a7669;
+    --accent: #1a1a1a;
+    --accent-soft: #ececea;
+  }
+  *{ box-sizing: border-box; }
+  html, body{
+    margin:0; padding:0; height:100%;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  #map{ position:absolute; inset:0; background: var(--bg); }
+
+  .panel{
+    position:absolute;
+    top:16px; left:16px;
+    z-index:10;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(43,42,37,0.12);
+    overflow: hidden;
+    width: 270px;
+    transition: width 0.15s ease;
+  }
+  .panel.collapsed{ width: auto; }
+
+  .panel-header{
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 16px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .brand{ display:flex; align-items:flex-start; gap: 8px; }
+  .brand svg.logo{ height: 16px; width: auto; flex: none; }
+  .brand h1{
+    font-size: 13px;
+    margin: 0;
+    letter-spacing: normal;
+    color: var(--text);
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .chevron{
+    width: 16px; height:16px;
+    flex: none;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  .panel.collapsed .chevron{ transform: rotate(-90deg); }
+
+  .panel-body{ padding: 0 16px 14px 16px; }
+  .panel.collapsed .panel-body{ display:none; }
+
+  fieldset{ border:none; padding:0; margin: 12px 0 10px 0; }
+  legend{
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin-bottom: 4px;
+    padding:0;
+  }
+  .style-select{
+    width: 100%;
+    padding: 7px 9px;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .style-select:focus{ outline: none; border-color: var(--accent); }
+
+  #coord-form{ display:flex; flex-direction: column; gap: 6px; width: 100%; }
+  .coord-input-wrap{ position: relative; width: 100%; }
+  #coord-input{
+    width: 100%;
+    padding: 7px 28px 7px 9px;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    font-size: 12.5px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  #coord-input:focus{ outline: none; border-color: var(--accent); }
+  .coord-clear{
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .coord-clear:hover{ background: var(--accent-soft); color: var(--text); }
+  .coord-clear.visible{ display: flex; }
+  .coord-go{
+    width: 100%;
+    padding: 7px 8px;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .coord-go:hover{ background: #000; }
+
+  .subsection{ margin-top: 6px; }
+  .subsection-header{
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 2px;
+  }
+  .subsection-header span{
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .subsection-header .chevron{ width: 13px; height:13px; }
+  .subsection.collapsed .chevron{ transform: rotate(-90deg); }
+  .subsection-body{ padding-top: 2px; }
+  .subsection.collapsed .subsection-body{ display:none; }
+
+  .row{
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 8px;
+    border-radius: 6px;
+  }
+  .row:hover{ background: var(--accent-soft); }
+  .row .label{ font-size: 13px; }
+  .row .label .desc{
+    display:block;
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 1px;
+  }
+  .switch{ position: relative; width: 38px; height: 22px; flex: none; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .slider{
+    position:absolute; inset:0;
+    background: #d8d4c8;
+    border-radius: 999px;
+    cursor:pointer;
+    transition: background 0.15s;
+  }
+  .slider::before{
+    content:"";
+    position:absolute;
+    height:16px; width:16px;
+    left:3px; top:3px;
+    background: #ffffff;
+    border-radius:50%;
+    transition: transform 0.15s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
+  input:checked + .slider{ background: var(--accent); }
+  input:checked + .slider::before{ transform: translateX(16px); }
+
+  hr{ border: none; border-top: 1px solid var(--panel-border); margin: 8px 0; }
+  .hint{ font-size: 10.5px; color: var(--muted); line-height: 1.4; margin-top: 8px; }
+  .maplibregl-ctrl-attrib{ font-size: 10px !important; }
+
+  .reset-view-btn{
+    width: 29px;
+    height: 29px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor: pointer;
+    background: #fff;
+    color: var(--text);
+  }
+  .reset-view-btn:hover{ background: #f0efe9; }
+  .reset-view-btn svg{ width: 14px; height:17px; }
+
+  #status{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding: 24px;
+    font-size: 13px;
+    color: var(--muted);
+    z-index: 5;
+    background: var(--bg);
+  }
+  #status.hidden{ display:none; }
+  #status .err{ color: #b3492f; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="status">Cargando mapa…</div>
+
+<div class="panel" id="panel">
+  <div class="panel-header" id="panel-toggle">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 567.1 88.2" xmlns="http://www.w3.org/2000/svg">
+        <path d="M40.6,40.5c0,5-1.8,7.2-6.7,7.2h-2v-14.5h2c4.8,0,6.7,2.3,6.7,7.3M71.7,87v-14.5h-.9c-.9,0-2.1-.7-2.5-2.5l-.6-3c-1.8-9-5.3-12-12.1-13.5v-.4c9.1-2.7,12.3-8.2,12.3-15.9,0-13.5-8.6-20.2-30.7-20.2H0v15h2.4c1,0,2.7,1.7,2.7,2.7v35.1c0,1-1.7,2.7-2.7,2.7H0v14.5h37.7v-14.5h-5v-10.3h3.1c3.4,0,5,1.6,5.4,5.8l1.8,19h28.7ZM85.5,14.6h14.7l10.3-8.6V0h-22.9l-2.1,14.6ZM75,87h38.6v-14.5h-2.8c-1,0-2.7-1.7-2.7-2.7v-35.1c0-1,1.7-2.7,2.7-2.7h2.8v-15h-38.6v15h2.8c1,0,2.7,1.7,2.7,2.7v35.1c0,1-1.7,2.7-2.7,2.7h-2.8v14.5ZM161.9,52.5c0,12.5-3.4,18.6-8.9,18.6s-8.9-6.1-8.9-18.6,3.4-18,8.9-18,8.9,5.5,8.9,18M190.2,52c0-23.2-16.4-36.2-37.2-36.2s-37.2,13-37.2,36.2,15.6,36.2,37.2,36.2,37.2-13,37.2-36.2M206,87h30.2v-14.5h-5.5v-20.3h.3l19.2,34.8h24.1v-52.3c0-1,1.7-2.7,2.7-2.7h2v-15h-29.5v15h5.2v16.3h-.3l-17.2-31.3h-31.2v15h2.4c1,0,2.7,1.7,2.7,2.7v35.1c0,1-1.7,2.7-2.7,2.7h-2.4v14.5ZM282.3,87h62.5v-25.4h-16.5l-2.1,9.7h-11.2v-12h15.1v-16.1h-15.1v-10h11l2.3,7.9h15.7v-24.1h-61.7v15h2.4c1,0,2.7,1.7,2.7,2.7v35.1c0,1-1.7,2.7-2.7,2.7h-2.4v14.5ZM382.6,88.2c5.9,0,12.7-1.3,15.5-3.1,1.8,0,2.7,1.9,2.7,1.9h13.5v-19.9c0-1,1.7-2.7,2.7-2.7h1.1v-14.5h-33.5v14.1h3.8v7.1c-.7.2-1.5.3-2.4.3-7.6,0-9.4-7.3-9.4-19.8s4.6-17.8,12.3-17.8,2.4.1,3.2.2l2.7,8.5h17.4v-25.5h-18.2c-3.4-.7-7-1.2-10.8-1.2-21,0-35.3,12.9-35.3,37.1s12.4,35.3,34.7,35.3M461,40.5c0,5-1.8,7.2-6.7,7.2h-2v-14.5h2c4.8,0,6.7,2.3,6.7,7.3M492.1,87v-14.5h-.9c-.9,0-2.1-.7-2.5-2.5l-.6-3c-1.8-9-5.3-12-12.1-13.5v-.4c9.1-2.7,12.3-8.2,12.3-15.9,0-13.5-8.6-20.2-30.7-20.2h-37.2v15h2.4c1,0,2.7,1.7,2.7,2.7v35.1c0,1-1.7,2.7-2.7,2.7h-2.4v14.5h37.7v-14.5h-5v-10.3h3.1c3.4,0,5,1.6,5.4,5.8l1.8,19h28.7ZM538.8,52.5c0,12.5-3.4,18.6-8.9,18.6s-8.9-6.1-8.9-18.6,3.4-18,8.9-18,8.9,5.5,8.9,18M567.1,52c0-23.2-16.4-36.2-37.2-36.2s-37.2,13-37.2,36.2,15.6,36.2,37.2,36.2,37.2-13,37.2-36.2" fill="#160b00"/>
+      </svg>
+      <h1>MAPAS</h1>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+
+  <div class="panel-body">
+
+    <fieldset style="margin-top:0;">
+      <legend>Coordenadas</legend>
+      <form id="coord-form">
+        <div class="coord-input-wrap">
+          <input type="text" id="coord-input" placeholder="-38.9516, -68.0591" required>
+          <button type="button" class="coord-clear" id="coord-clear" title="Borrar ubicación">✕</button>
+        </div>
+        <button type="submit" class="coord-go">Ir a la ubicación</button>
+      </form>
+    </fieldset>
+
+    <hr>
+
+    <fieldset>
+      <legend>Estilo base</legend>
+      <select class="style-select" id="style-select">
+        <option value="standard" selected>Estándar</option>
+        <option value="satellite">Satelital</option>
+        <option value="opentopo">OpenTopoMap (Raster)</option>
+      </select>
+    </fieldset>
+
+    <hr>
+
+    <div class="subsection collapsed" id="layers-section">
+      <div class="subsection-header" id="layers-toggle">
+        <span>Capas</span>
+        <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="subsection-body">
+        <div class="row">
+          <span class="label">Nombres
+            <span class="desc">Calles, ciudades, POIs</span>
+          </span>
+          <label class="switch">
+            <input type="checkbox" id="toggle-labels" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="row">
+          <span class="label">Calles y caminos
+            <span class="desc">Líneas de vías</span>
+          </span>
+          <label class="switch">
+            <input type="checkbox" id="toggle-roads" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="row">
+          <span class="label">Límites de provincias
+            <span class="desc">Fronteras administrativas</span>
+          </span>
+          <label class="switch">
+            <input type="checkbox" id="toggle-boundaries" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="row">
+          <span class="label">Ríos y cuencas
+            <span class="desc">Cursos de agua</span>
+          </span>
+          <label class="switch">
+            <input type="checkbox" id="toggle-rivers" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="row">
+          <span class="label">Áreas protegidas
+            <span class="desc">Parques nacionales y reservas (WDPA)</span>
+          </span>
+          <label class="switch">
+            <input type="checkbox" id="toggle-protected">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="hint">
+      Datos: OpenStreetMap contributors (vía OpenFreeMap y OpenTopoMap), Esri World Imagery, AWS Terrain Tiles, UNEP-WCMC/IUCN (WDPA).
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<script>
+  if (typeof maplibregl === 'undefined') {
+    document.getElementById('status').innerHTML =
+      '<span class="err">No se pudo cargar la librería del mapa (MapLibre GL) desde el CDN. Revisá tu conexión a internet o si algún bloqueador de contenido está frenando unpkg.com.</span>';
+    throw new Error('maplibregl no se cargó');
+  }
+</script>
+<script>
+  const statusEl = document.getElementById('status');
+  function showStatus(msg, isError){
+    statusEl.classList.remove('hidden');
+    statusEl.innerHTML = isError ? `<span class="err">${msg}</span>` : msg;
+  }
+  function hideStatus(){ statusEl.classList.add('hidden'); }
+
+  const LIBERTY_URL = 'https://tiles.openfreemap.org/styles/liberty';
+
+  const SATELLITE_STYLE = {
+    version: 8,
+    sources: {
+      'esri-satellite': {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: 'Imagery © Esri, Maxar, Earthstar Geographics'
+      }
+    },
+    layers: [{ id: 'esri-satellite-layer', type: 'raster', source: 'esri-satellite' }]
+  };
+
+  const OPENTOPO_STYLE = {
+    version: 8,
+    sources: {
+      'opentopo': {
+        type: 'raster',
+        tiles: [
+          'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
+          'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
+          'https://c.tile.opentopomap.org/{z}/{x}/{y}.png'
+        ],
+        tileSize: 256,
+        attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)'
+      }
+    },
+    layers: [{ id: 'opentopo-layer', type: 'raster', source: 'opentopo' }]
+  };
+
+  function styleForKey(key){
+    if (key === 'satellite') return SATELLITE_STYLE;
+    if (key === 'opentopo') return OPENTOPO_STYLE;
+    return LIBERTY_URL;
+  }
+
+  const PROTECTED_SOURCE_ID = 'protected-areas-src';
+  const PROTECTED_LAYER_ID = 'protected-areas-layer';
+
+  // Estado de los toggles, se preserva al cambiar de estilo base
+  const state = {
+    labels: true,
+    roads: true,
+    boundaries: true,
+    rivers: true,
+    protected: false
+  };
+
+  let switchTimeoutId = null;
+  let isSwitching = false;
+
+  function armSwitchWatchdog(){
+    clearTimeout(switchTimeoutId);
+    switchTimeoutId = setTimeout(() => {
+      if (isSwitching) {
+        showStatus('El nuevo estilo está tardando demasiado en cargar. Puede ser un corte de red o que el servidor de tiles no responda en este momento. Probá recargar la página.', true);
+      }
+    }, 10000);
+  }
+
+  let map;
+  try {
+    map = new maplibregl.Map({
+      container: 'map',
+      style: LIBERTY_URL,
+      center: [-68.06, -38.95],
+      zoom: 11,
+      attributionControl: true
+    });
+  } catch (err) {
+    showStatus('No se pudo inicializar el mapa: ' + err.message, true);
+    throw err;
+  }
+
+  isSwitching = true;
+  armSwitchWatchdog();
+
+  class ResetViewControl {
+    onAdd(mapInstance){
+      this._map = mapInstance;
+      this._container = document.createElement('div');
+      this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'reset-view-btn';
+      button.title = 'Restablecer vista 2D orientada al norte';
+      button.innerHTML = '<svg viewBox="0 0 17.12 20.83" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M11.1,4.11s0,0,0,0L8.8.14c-.11-.19-.37-.19-.48,0l-2.29,3.97s0,0,0,0C2.53,5.19,0,8.45,0,12.28c0,4.71,3.84,8.55,8.56,8.55s8.56-3.84,8.56-8.55c0-3.83-2.53-7.09-6.02-8.17ZM8.56,19.33c-3.89,0-7.06-3.16-7.06-7.05s3.17-7.06,7.06-7.06,7.06,3.16,7.06,7.06-3.17,7.05-7.06,7.05ZM9.67,9.01h1.73v6.86h-1.62l-2.06-3.01-.22-.44-.05.02v3.43h-1.73v-6.86h1.58l1.99,2.91.33.61.05-.03v-3.49Z"/></svg>';
+      button.addEventListener('click', () => {
+        mapInstance.easeTo({ pitch: 0, bearing: 0, duration: 400 });
+      });
+      this._container.appendChild(button);
+      return this._container;
+    }
+    onRemove(){
+      this._container.parentNode.removeChild(this._container);
+      this._map = undefined;
+    }
+  }
+
+  map.addControl(new ResetViewControl(), 'bottom-left');
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-left');
+
+  map.on('error', (e) => {
+    const msg = (e && e.error && e.error.message) ? e.error.message : 'error desconocido';
+    console.error('MapLibre error:', e && e.error ? e.error : e);
+    if (isSwitching) {
+      clearTimeout(switchTimeoutId);
+      isSwitching = false;
+      showStatus('No se pudo cargar ese estilo de mapa (' + msg + '). Probá con otra opción o revisá tu conexión.', true);
+    }
+  });
+
+  map.on('style.load', () => {
+    clearTimeout(switchTimeoutId);
+    isSwitching = false;
+    hideStatus();
+    addExtraLayers();
+    applyLayerVisibility();
+  });
+
+  function addExtraLayers(){
+    if (!map.getSource(PROTECTED_SOURCE_ID)) {
+      map.addSource(PROTECTED_SOURCE_ID, {
+        type: 'raster',
+        tiles: ['https://data-gis.unep-wcmc.org/server/rest/services/ProtectedSites/The_World_Database_of_Protected_Areas/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: 'Protected areas: UNEP-WCMC and IUCN, WDPA'
+      });
+    }
+    if (!map.getLayer(PROTECTED_LAYER_ID)) {
+      map.addLayer({ id: PROTECTED_LAYER_ID, type: 'raster', source: PROTECTED_SOURCE_ID, paint: { 'raster-opacity': 0.65 } });
+    }
+  }
+
+  function applyLayerVisibility(){
+    const layers = map.getStyle().layers;
+
+    const labelLayerIds = layers.filter(l => l.type === 'symbol').map(l => l.id);
+    const roadLayerIds = layers
+      .filter(l => l.type === 'line' && /road|street|highway|bridge|tunnel/i.test(l.id))
+      .map(l => l.id);
+    const boundaryLayerIds = layers
+      .filter(l => l.type === 'line' && /boundary|admin/i.test(l.id))
+      .map(l => l.id);
+    const riverLayerIds = layers
+      .filter(l => l.type === 'line' && /river|waterway|stream/i.test(l.id))
+      .map(l => l.id);
+
+    labelLayerIds.forEach(id => map.setLayoutProperty(id, 'visibility', state.labels ? 'visible' : 'none'));
+    roadLayerIds.forEach(id => map.setLayoutProperty(id, 'visibility', state.roads ? 'visible' : 'none'));
+    boundaryLayerIds.forEach(id => map.setLayoutProperty(id, 'visibility', state.boundaries ? 'visible' : 'none'));
+    riverLayerIds.forEach(id => map.setLayoutProperty(id, 'visibility', state.rivers ? 'visible' : 'none'));
+
+    if (map.getLayer(PROTECTED_LAYER_ID)) {
+      map.setLayoutProperty(PROTECTED_LAYER_ID, 'visibility', state.protected ? 'visible' : 'none');
+    }
+  }
+
+  const toggleMap = {
+    'toggle-labels': 'labels',
+    'toggle-roads': 'roads',
+    'toggle-boundaries': 'boundaries',
+    'toggle-rivers': 'rivers',
+    'toggle-protected': 'protected'
+  };
+  Object.keys(toggleMap).forEach(id => {
+    document.getElementById(id).addEventListener('change', (e) => {
+      state[toggleMap[id]] = e.target.checked;
+      applyLayerVisibility();
+    });
+  });
+
+  document.getElementById('style-select').addEventListener('change', (e) => {
+    isSwitching = true;
+    showStatus('Cambiando de estilo…', false);
+    armSwitchWatchdog();
+    map.setStyle(styleForKey(e.target.value));
+  });
+
+  // --- Coordenadas: campo único "lat, lon" + botón para borrar ---
+  const coordInput = document.getElementById('coord-input');
+  const coordClear = document.getElementById('coord-clear');
+  let marker = null;
+
+  function clearLocation(){
+    if (marker) { marker.remove(); marker = null; }
+    coordInput.value = '';
+    coordClear.classList.remove('visible');
+  }
+
+  document.getElementById('coord-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const raw = coordInput.value.trim();
+    const parts = raw.split(/[,;\s]+/).filter(Boolean).map(parseFloat);
+    if (parts.length < 2 || parts.some(Number.isNaN)) return;
+    const [lat, lon] = parts;
+    if (marker) marker.remove();
+    marker = new maplibregl.Marker({ color: '#1a1a1a' }).setLngLat([lon, lat]).addTo(map);
+    map.flyTo({ center: [lon, lat], zoom: 13, essential: true });
+    coordClear.classList.add('visible');
+  });
+
+  coordClear.addEventListener('click', clearLocation);
+
+  // Panel colapsable
+  const panel = document.getElementById('panel');
+  document.getElementById('panel-toggle').addEventListener('click', () => {
+    panel.classList.toggle('collapsed');
+  });
+
+  // Subsección de capas colapsable
+  const layersSection = document.getElementById('layers-section');
+  document.getElementById('layers-toggle').addEventListener('click', () => {
+    layersSection.classList.toggle('collapsed');
+  });
+</script>
+
+</body>
+</html>
