@@ -384,21 +384,8 @@
 
   const LIBERTY_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
-  const THUNDERFOREST_API_KEY = '0d7ea65754f6440786b276a30ca32db9';
-  const OUTDOORS_STYLE = {
-    version: 8,
-    sources: {
-      'thunderforest-outdoors-src': {
-        type: 'raster',
-        tiles: ['https://api.thunderforest.com/outdoors/{z}/{x}/{y}.png?apikey=' + THUNDERFOREST_API_KEY],
-        tileSize: 256,
-        attribution: '&copy; <a href="https://www.thunderforest.com/">Thunderforest</a>, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
-      }
-    },
-    layers: [
-      { id: 'thunderforest-outdoors-layer', type: 'raster', source: 'thunderforest-outdoors-src' }
-    ]
-  };
+  const MAPTILER_API_KEY = 'Nlsu8Jxd0WZ9eJJNvIj1';
+  const OUTDOORS_URL = 'https://api.maptiler.com/maps/outdoor-v2/style.json?key=' + MAPTILER_API_KEY;
 
   // Estado de los toggles
   const state = {
@@ -518,23 +505,29 @@
   });
 
   function applyLayerVisibility(){
-    const layers = map.getStyle().layers;
+    const style = map.getStyle();
+    if (!style || !style.layers) return;
+    const layers = style.layers;
 
     const labelLayerIds = layers.filter(l => l.type === 'symbol').map(l => l.id);
     const roadLayerIds = layers
-      .filter(l => l.type === 'line' && /road|street|highway|bridge|tunnel/i.test(l.id))
+      .filter(l => l.type === 'line' && (l['source-layer'] === 'transportation' || /road|street|highway|bridge|tunnel/i.test(l.id)))
       .map(l => l.id);
     const boundaryLayerIds = layers
-      .filter(l => l.type === 'line' && /boundary|admin/i.test(l.id))
+      .filter(l => l.type === 'line' && (l['source-layer'] === 'boundary' || /boundary|admin/i.test(l.id)))
       .map(l => l.id);
     const riverLayerIds = layers
-      .filter(l => l.type === 'line' && /river|waterway|stream/i.test(l.id))
+      .filter(l => l.type === 'line' && (l['source-layer'] === 'waterway' || /river|waterway|stream/i.test(l.id)))
       .map(l => l.id);
 
-    labelLayerIds.forEach(id => map.setLayoutProperty(id, 'visibility', state.labels ? 'visible' : 'none'));
-    roadLayerIds.forEach(id => map.setLayoutProperty(id, 'visibility', state.roads ? 'visible' : 'none'));
-    boundaryLayerIds.forEach(id => map.setLayoutProperty(id, 'visibility', state.boundaries ? 'visible' : 'none'));
-    riverLayerIds.forEach(id => map.setLayoutProperty(id, 'visibility', state.rivers ? 'visible' : 'none'));
+    const setVis = (id, visible) => {
+      try { map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none'); }
+      catch (err) { console.warn('No se pudo cambiar visibilidad de', id, err); }
+    };
+    labelLayerIds.forEach(id => setVis(id, state.labels));
+    roadLayerIds.forEach(id => setVis(id, state.roads));
+    boundaryLayerIds.forEach(id => setVis(id, state.boundaries));
+    riverLayerIds.forEach(id => setVis(id, state.rivers));
   }
 
   const toggleMap = {
@@ -555,7 +548,14 @@
     isSwitching = true;
     armSwitchWatchdog();
     showStatus('Cargando mapa…');
-    map.setStyle(e.target.value === 'outdoors' ? OUTDOORS_STYLE : LIBERTY_URL);
+    try {
+      map.setStyle(e.target.value === 'outdoors' ? OUTDOORS_URL : LIBERTY_URL, { diff: false });
+    } catch (err) {
+      clearTimeout(switchTimeoutId);
+      isSwitching = false;
+      console.error('Error al cambiar de estilo:', err);
+      showStatus('No se pudo cambiar el mapa base (' + err.message + '). Probá recargar la página.', true);
+    }
   });
 
   // Filtro de escala de grises sobre el mapa
