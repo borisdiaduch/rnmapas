@@ -24,7 +24,6 @@
     color: var(--text);
   }
   #map{ position:absolute; inset:0; background: var(--bg); }
-  #map.map-grayscale{ filter: grayscale(50%); }
 
   .panel{
     position:absolute;
@@ -39,6 +38,11 @@
     transition: width 0.15s ease;
   }
   .panel.collapsed{ width: auto; }
+
+  @media (max-width: 480px){
+    .panel{ width: calc(100vw - 32px); max-width: 440px; }
+    .panel.collapsed{ width: calc(100vw - 32px); max-width: 440px; }
+  }
 
   .panel-header{
     display:flex;
@@ -205,8 +209,10 @@
   hr{ border: none; border-top: 1px solid var(--panel-border); margin: 8px 0; }
   .hint{ font-size: 10.5px; color: var(--muted); line-height: 1.4; margin-top: 8px; }
   .maplibregl-ctrl-attrib{ font-size: 10px !important; }
+  .maplibregl-ctrl-bottom-left .maplibregl-ctrl{ margin: 0 0 16px 16px; }
+  .maplibregl-ctrl-group button{ display: flex; }
 
-  .reset-view-btn{
+  .map-ctrl-btn{
     width: 29px;
     height: 29px;
     display:flex;
@@ -215,22 +221,11 @@
     cursor: pointer;
     background: #fff;
     color: var(--text);
+    border: none;
+    padding: 0;
   }
-  .reset-view-btn:hover{ background: #f0efe9; }
-  .reset-view-btn svg{ width: 15px; height:15px; }
-
-  .screenshot-btn{
-    width: 29px;
-    height: 29px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    cursor: pointer;
-    background: #fff;
-    color: var(--text);
-  }
-  .screenshot-btn:hover{ background: #f0efe9; }
-  .screenshot-btn svg{ width: 15px; height:15px; }
+  .map-ctrl-btn:hover{ background: #f0efe9; }
+  .map-ctrl-btn svg{ width: 15px; height:15px; }
 
   #status{
     position:absolute;
@@ -269,11 +264,10 @@
 
   <div class="panel-body">
 
-    <fieldset style="margin-top:0;">
-      <legend>Coordenadas</legend>
+    <fieldset style="margin-top:5px;">
       <form id="coord-form">
         <div class="coord-input-wrap">
-          <input type="text" id="coord-input" placeholder="-38.9516, -68.0591" required>
+          <input type="text" id="coord-input" placeholder="-38.9516, -68.0591">
           <button type="button" class="coord-clear" id="coord-clear" title="Borrar ubicación">✕</button>
         </div>
         <button type="submit" class="coord-go">Ir a la ubicación</button>
@@ -284,7 +278,7 @@
 
     <div class="subsection collapsed" id="basemap-section">
       <div class="subsection-header" id="basemap-toggle">
-        <span>Mapa base</span>
+        <span>Mapa</span>
         <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
@@ -292,8 +286,9 @@
       <div class="subsection-body">
       <div class="basemap-row">
         <select id="basemap-select" class="basemap-select">
-          <option value="liberty">Estándar</option>
+          <option value="liberty" selected>Estándar</option>
           <option value="outdoors">Relieve</option>
+          <option value="outdoors2">Personalizado</option>
         </select>
       </div>
       </div>
@@ -318,7 +313,7 @@
       </div>
 
       <div class="row">
-        <span class="label">Calles y caminos
+        <span class="label">Rutas y calles
           <span class="desc">Líneas de vías</span>
         </span>
         <label class="switch">
@@ -339,6 +334,16 @@
 
 
       <div class="row">
+        <span class="label">Ejido urbano
+          <span class="desc">Áreas residenciales urbanas</span>
+        </span>
+        <label class="switch">
+          <input type="checkbox" id="toggle-residential" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="row">
         <span class="label">Ríos y cuencas
           <span class="desc">Cursos de agua</span>
         </span>
@@ -347,22 +352,9 @@
           <span class="slider"></span>
         </label>
       </div>
-
-      <div class="row">
-        <span class="label">Escala de grises
-          <span class="desc">Filtro visual sobre el mapa</span>
-        </span>
-        <label class="switch">
-          <input type="checkbox" id="toggle-grayscale">
-          <span class="slider"></span>
-        </label>
-      </div>
       </div>
     </div>
 
-    <div class="hint">
-      Datos: OpenStreetMap contributors (vía OpenFreeMap).
-    </div>
   </div>
 </div>
 
@@ -386,13 +378,15 @@
 
   const MAPTILER_API_KEY = 'Nlsu8Jxd0WZ9eJJNvIj1';
   const OUTDOORS_URL = 'https://api.maptiler.com/maps/outdoor-v2/style.json?key=' + MAPTILER_API_KEY;
+  const OUTDOORS2_URL = 'https://api.maptiler.com/maps/01a03c4d-2e0e-7f2f-963e-109f8b69dd65/style.json?key=' + MAPTILER_API_KEY;
 
   // Estado de los toggles
   const state = {
     labels: true,
     roads: true,
     boundaries: true,
-    rivers: true
+    rivers: true,
+    residential: true
   };
 
   let switchTimeoutId = null;
@@ -425,6 +419,11 @@
   isSwitching = true;
   armSwitchWatchdog();
 
+  const ICON_NAVIGATION = '<svg viewBox="0 -960 960 960" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="m480-226.13-260.63 111.2q-14.67 5.71-27.85 2.73-13.17-2.97-22.37-12.17-9.19-9.19-12.05-22.75-2.86-13.55 3.1-28.23l277.78-625.76q5.72-13.67 17.65-20.51 11.94-6.84 24.37-6.84 12.43 0 24.37 6.84 11.93 6.84 17.65 20.51L799.8-175.35q5.96 14.68 3.1 28.23-2.86 13.56-12.05 22.75-9.2 9.2-22.37 12.17-13.18 2.98-27.85-2.73L480-226.13Z"/></svg>';
+  const ICON_SCREENSHOT = '<svg viewBox="0 -960 960 960" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M813.41-573.41q-12.69-12.7-12.69-31.13v-76.18H724.3q-18.52 0-31.05-12.69-12.53-12.7-12.53-31.13 0-18.44 12.69-31.01 12.7-12.58 31.13-12.58h72.59q37.78 0 64.39 26.61t26.61 64.39v72.83q0 18.52-12.58 31.05-12.57 12.53-31.01 12.53-18.43 0-31.13-12.69ZM115.7-560.72q-18.44 0-31.13-12.69-12.7-12.7-12.7-31.13v-72.59q0-37.78 26.61-64.39t64.39-26.61h72.83q18.52 0 31.05 12.58 12.53 12.57 12.53 31.01 0 18.43-12.53 31.13-12.53 12.69-31.05 12.69h-76.42v76.42q0 18.52-12.53 31.05-12.53 12.53-31.05 12.53Zm608.6 368.85q-18.52 0-31.05-12.7-12.53-12.69-12.53-31.13 0-18.43 12.69-31.01 12.7-12.57 31.13-12.57h76.18v-76.42q0-18.52 12.69-31.05 12.7-12.53 31.13-12.53 18.44 0 31.01 12.53 12.58 12.53 12.58 31.05v72.83q0 37.78-26.61 64.39t-64.39 26.61H724.3Zm-561.43 0q-37.78 0-64.39-26.61t-26.61-64.39v-72.83q0-18.52 12.7-31.05 12.69-12.53 31.13-12.53 18.43 0 31.01 12.53 12.57 12.53 12.57 31.05v76.42h76.42q18.52 0 31.05 12.57 12.53 12.58 12.53 31.01 0 18.44-12.53 31.13-12.53 12.7-31.05 12.7h-72.83Z"/></svg>';
+  const ICON_ADD = '<svg viewBox="0 -960 960 960" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M434.5-434.5H237.37q-19.15 0-32.33-13.17-13.17-13.18-13.17-32.33t13.17-32.33q13.18-13.17 32.33-13.17H434.5v-197.13q0-19.15 13.17-32.33 13.18-13.17 32.33-13.17t32.33 13.17q13.17 13.18 13.17 32.33v197.13h197.13q19.15 0 32.33 13.17 13.17 13.18 13.17 32.33t-13.17 32.33q-13.18 13.17-32.33 13.17H525.5v197.13q0 19.15-13.17 32.33-13.18 13.17-32.33 13.17t-32.33-13.17q-13.17-13.18-13.17-32.33V-434.5Z"/></svg>';
+  const ICON_REMOVE = '<svg viewBox="0 -960 960 960" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M237.37-434.5q-19.15 0-32.33-13.17-13.17-13.18-13.17-32.33t13.17-32.33q13.18-13.17 32.33-13.17h485.26q19.15 0 32.33 13.17 13.17 13.18 13.17 32.33t-13.17 32.33q-13.18 13.17-32.33 13.17H237.37Z"/></svg>';
+
   class ResetViewControl {
     onAdd(mapInstance){
       this._map = mapInstance;
@@ -432,9 +431,9 @@
       this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'reset-view-btn';
+      button.className = 'map-ctrl-btn';
       button.title = 'Restablecer vista 2D orientada al norte';
-      button.innerHTML = '<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M17.7,13.8v5.4h0l-.5-.9-3.1-4.5h-2.4v10.5h2.7v-5.3h0l.3.6,3.2,4.6h2.5v-10.5h-2.7ZM19.9,6.3L16.4.2c-.2-.3-.6-.3-.7,0l-3.5,6.1c-2.7.8-5,2.5-6.7,4.7-1.6,2.2-2.6,4.9-2.6,7.9,0,7.2,5.9,13.1,13.1,13.1s13.1-5.9,13.1-13.1-3.9-10.9-9.2-12.5h0ZM16,29.7c-6,0-10.8-4.9-10.8-10.8s4.9-10.8,10.8-10.8,10.8,4.9,10.8,10.8-4.9,10.8-10.8,10.8Z"/></svg>';
+      button.innerHTML = ICON_NAVIGATION;
       button.addEventListener('click', () => {
         mapInstance.easeTo({ pitch: 0, bearing: 0, duration: 400 });
       });
@@ -454,11 +453,41 @@
       this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'screenshot-btn';
+      button.className = 'map-ctrl-btn';
       button.title = 'Copiar captura del mapa al portapapeles';
-      button.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" xmlns="http://www.w3.org/2000/svg"><path d="M4 7.2h2.1l.95-1.7h5.9l.95,1.7H16a1 1 0 0 1 1 1v6.8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.2a1 1 0 0 1 1-1z" stroke-linejoin="round" stroke-linecap="round"/><circle cx="10" cy="11.4" r="2.5"/></svg>';
+      button.innerHTML = ICON_SCREENSHOT;
       button.addEventListener('click', () => { copyMapScreenshot(); });
       this._container.appendChild(button);
+      return this._container;
+    }
+    onRemove(){
+      this._container.parentNode.removeChild(this._container);
+      this._map = undefined;
+    }
+  }
+
+  class ZoomControl {
+    onAdd(mapInstance){
+      this._map = mapInstance;
+      this._container = document.createElement('div');
+      this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+
+      const zoomInBtn = document.createElement('button');
+      zoomInBtn.type = 'button';
+      zoomInBtn.className = 'map-ctrl-btn';
+      zoomInBtn.title = 'Acercar';
+      zoomInBtn.innerHTML = ICON_ADD;
+      zoomInBtn.addEventListener('click', () => mapInstance.zoomIn());
+
+      const zoomOutBtn = document.createElement('button');
+      zoomOutBtn.type = 'button';
+      zoomOutBtn.className = 'map-ctrl-btn';
+      zoomOutBtn.title = 'Alejar';
+      zoomOutBtn.innerHTML = ICON_REMOVE;
+      zoomOutBtn.addEventListener('click', () => mapInstance.zoomOut());
+
+      this._container.appendChild(zoomInBtn);
+      this._container.appendChild(zoomOutBtn);
       return this._container;
     }
     onRemove(){
@@ -484,7 +513,7 @@
   }
 
   map.addControl(new ResetViewControl(), 'bottom-left');
-  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-left');
+  map.addControl(new ZoomControl(), 'bottom-left');
   map.addControl(new ScreenshotControl(), 'bottom-left');
 
   map.on('error', (e) => {
@@ -519,6 +548,9 @@
     const riverLayerIds = layers
       .filter(l => l.type === 'line' && (l['source-layer'] === 'waterway' || /river|waterway|stream/i.test(l.id)))
       .map(l => l.id);
+    const residentialLayerIds = layers
+      .filter(l => /residential/i.test(l.id))
+      .map(l => l.id);
 
     const setVis = (id, visible) => {
       try { map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none'); }
@@ -528,13 +560,15 @@
     roadLayerIds.forEach(id => setVis(id, state.roads));
     boundaryLayerIds.forEach(id => setVis(id, state.boundaries));
     riverLayerIds.forEach(id => setVis(id, state.rivers));
+    residentialLayerIds.forEach(id => setVis(id, state.residential));
   }
 
   const toggleMap = {
     'toggle-labels': 'labels',
     'toggle-roads': 'roads',
     'toggle-boundaries': 'boundaries',
-    'toggle-rivers': 'rivers'
+    'toggle-rivers': 'rivers',
+    'toggle-residential': 'residential'
   };
   Object.keys(toggleMap).forEach(id => {
     document.getElementById(id).addEventListener('change', (e) => {
@@ -543,13 +577,18 @@
     });
   });
 
-  // Alternar mapa base (Estándar / Relieve)
+  // Alternar mapa base (Personalizado / Estándar / Relieve)
+  const BASEMAP_URLS = {
+    liberty: LIBERTY_URL,
+    outdoors: OUTDOORS_URL,
+    outdoors2: OUTDOORS2_URL
+  };
   document.getElementById('basemap-select').addEventListener('change', (e) => {
     isSwitching = true;
     armSwitchWatchdog();
     showStatus('Cargando mapa…');
     try {
-      map.setStyle(e.target.value === 'outdoors' ? OUTDOORS_URL : LIBERTY_URL, { diff: false });
+      map.setStyle(BASEMAP_URLS[e.target.value] || LIBERTY_URL, { diff: false });
     } catch (err) {
       clearTimeout(switchTimeoutId);
       isSwitching = false;
@@ -558,12 +597,7 @@
     }
   });
 
-  // Filtro de escala de grises sobre el mapa
-  document.getElementById('toggle-grayscale').addEventListener('change', (e) => {
-    document.getElementById('map').classList.toggle('map-grayscale', e.target.checked);
-  });
-
-  // --- Coordenadas: campo único "lat, lon" + botón para borrar ---
+  // --- Coordenadas: campo único "lat, lon" (decimal) o DMS "41°12'50.37"S 66°48'58.47"W" ---
   const coordInput = document.getElementById('coord-input');
   const coordClear = document.getElementById('coord-clear');
   let marker = null;
@@ -574,12 +608,37 @@
     coordClear.classList.remove('visible');
   }
 
+  // Parsea coordenadas en formato grados/minutos/segundos, ej: 41°12'50.37"S 66°48'58.47"W
+  function parseDMSCoords(str){
+    const regex = /(\d{1,3})[°:\s]+(\d{1,2})['’′:\s]+([\d.]+)["”″]?\s*([NSEWnsew])/g;
+    const matches = [...str.matchAll(regex)];
+    if (matches.length !== 2) return null;
+    let lat = null, lon = null;
+    for (const m of matches) {
+      const deg = parseFloat(m[1]);
+      const min = parseFloat(m[2]);
+      const sec = parseFloat(m[3]);
+      if ([deg, min, sec].some(Number.isNaN)) return null;
+      let val = deg + min / 60 + sec / 3600;
+      const hem = m[4].toUpperCase();
+      if (hem === 'S' || hem === 'W') val = -val;
+      if (hem === 'N' || hem === 'S') lat = val;
+      else lon = val;
+    }
+    if (lat === null || lon === null) return null;
+    return [lat, lon];
+  }
+
   document.getElementById('coord-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const raw = coordInput.value.trim();
-    const parts = raw.split(/[,;\s]+/).filter(Boolean).map(parseFloat);
-    if (parts.length < 2 || parts.some(Number.isNaN)) return;
-    const [lat, lon] = parts;
+    let coords = parseDMSCoords(raw);
+    if (!coords) {
+      const parts = raw.split(/[,;\s]+/).filter(Boolean).map(parseFloat);
+      if (parts.length < 2 || parts.some(Number.isNaN)) return;
+      coords = parts;
+    }
+    const [lat, lon] = coords;
     if (marker) marker.remove();
     marker = new maplibregl.Marker({ color: '#1a1a1a' }).setLngLat([lon, lat]).addTo(map);
     map.flyTo({ center: [lon, lat], zoom: 13, essential: true });
