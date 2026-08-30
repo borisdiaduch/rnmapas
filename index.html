@@ -168,6 +168,22 @@
   }
   .basemap-select:focus{ outline:none; border-color:var(--accent); }
 
+  .level-row{ padding: 6px 2px; }
+  .level-label{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    font-size: 12px;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .level-value{ font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .level-row input[type="range"]{
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
   .row{
     display:flex;
     align-items:center;
@@ -355,8 +371,65 @@
       </div>
     </div>
 
+    <div class="subsection collapsed" id="levels-section">
+      <div class="subsection-header" id="levels-toggle">
+        <span>Niveles <span style="font-weight:400; text-transform:none; letter-spacing:0; opacity:.7;">(prototipo)</span></span>
+        <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="subsection-body">
+        <div class="level-row">
+          <div class="level-label">
+            <span>Punto negro</span>
+            <span class="level-value" id="level-black-val">0</span>
+          </div>
+          <input type="range" id="level-black" min="0" max="254" value="0" step="1">
+        </div>
+        <div class="level-row">
+          <div class="level-label">
+            <span>Punto blanco</span>
+            <span class="level-value" id="level-white-val">255</span>
+          </div>
+          <input type="range" id="level-white" min="1" max="255" value="255" step="1">
+        </div>
+        <div class="level-row">
+          <div class="level-label">
+            <span>Gamma</span>
+            <span class="level-value" id="level-gamma-val">1.00</span>
+          </div>
+          <input type="range" id="level-gamma" min="0.1" max="3" value="1" step="0.01">
+        </div>
+        <div class="level-row">
+          <div class="level-label">
+            <span>Saturación</span>
+            <span class="level-value" id="level-sat-val">100%</span>
+          </div>
+          <input type="range" id="level-sat" min="0" max="200" value="100" step="1">
+        </div>
+        <button type="button" class="coord-go" id="level-reset" style="margin-top:6px; background:#fff; color:var(--text); border:1px solid var(--panel-border);">Restablecer</button>
+      </div>
+    </div>
+
   </div>
 </div>
+
+<svg width="0" height="0" style="position:absolute; overflow:hidden;" aria-hidden="true">
+  <defs>
+    <filter id="levels-filter" x="-20%" y="-20%" width="140%" height="140%">
+      <feComponentTransfer>
+        <feFuncR id="levels-lin-r" type="linear" slope="1" intercept="0"/>
+        <feFuncG id="levels-lin-g" type="linear" slope="1" intercept="0"/>
+        <feFuncB id="levels-lin-b" type="linear" slope="1" intercept="0"/>
+      </feComponentTransfer>
+      <feComponentTransfer>
+        <feFuncR id="levels-gamma-r" type="gamma" amplitude="1" exponent="1" offset="0"/>
+        <feFuncG id="levels-gamma-g" type="gamma" amplitude="1" exponent="1" offset="0"/>
+        <feFuncB id="levels-gamma-b" type="gamma" amplitude="1" exponent="1" offset="0"/>
+      </feComponentTransfer>
+    </filter>
+  </defs>
+</svg>
 
 <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
 <script>
@@ -498,9 +571,25 @@
 
   async function copyMapScreenshot(){
     try {
-      const canvas = map.getCanvas();
+      const sourceCanvas = map.getCanvas();
       map.triggerRepaint();
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+
+      // Si hay un filtro CSS aplicado sobre #map (ej. Niveles), lo horneamos
+      // en la imagen dibujando el canvas en uno temporal con ese mismo filtro,
+      // porque getCanvas() sólo devuelve los píxeles crudos del WebGL.
+      const cssFilter = mapEl.style.filter;
+      let canvasToExport = sourceCanvas;
+      if (cssFilter && cssFilter !== 'none') {
+        const temp = document.createElement('canvas');
+        temp.width = sourceCanvas.width;
+        temp.height = sourceCanvas.height;
+        const ctx = temp.getContext('2d');
+        ctx.filter = cssFilter;
+        ctx.drawImage(sourceCanvas, 0, 0);
+        canvasToExport = temp;
+      }
+
+      const blob = await new Promise(resolve => canvasToExport.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('no se pudo generar la imagen');
       await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
       showStatus('Captura del mapa copiada al portapapeles');
@@ -662,6 +751,60 @@
   const basemapSection = document.getElementById('basemap-section');
   document.getElementById('basemap-toggle').addEventListener('click', () => {
     basemapSection.classList.toggle('collapsed');
+  });
+
+  const levelsSection = document.getElementById('levels-section');
+  document.getElementById('levels-toggle').addEventListener('click', () => {
+    levelsSection.classList.toggle('collapsed');
+  });
+
+  // --- Niveles (prototipo): punto negro/blanco + gamma vía filtro SVG, saturación vía CSS ---
+  const levelBlack = document.getElementById('level-black');
+  const levelWhite = document.getElementById('level-white');
+  const levelGamma = document.getElementById('level-gamma');
+  const levelSat = document.getElementById('level-sat');
+  const levelBlackVal = document.getElementById('level-black-val');
+  const levelWhiteVal = document.getElementById('level-white-val');
+  const levelGammaVal = document.getElementById('level-gamma-val');
+  const levelSatVal = document.getElementById('level-sat-val');
+  const mapEl = document.getElementById('map');
+
+  const linFuncs = ['levels-lin-r', 'levels-lin-g', 'levels-lin-b'].map(id => document.getElementById(id));
+  const gammaFuncs = ['levels-gamma-r', 'levels-gamma-g', 'levels-gamma-b'].map(id => document.getElementById(id));
+
+  function updateLevels(){
+    let black = parseFloat(levelBlack.value);
+    let white = parseFloat(levelWhite.value);
+    if (white <= black) { white = black + 1; levelWhite.value = white; }
+    const gamma = parseFloat(levelGamma.value);
+    const sat = parseFloat(levelSat.value);
+
+    const b = black / 255, w = white / 255;
+    const slope = 1 / (w - b);
+    const intercept = -b / (w - b);
+    const gammaExp = 1 / gamma;
+
+    linFuncs.forEach(f => { f.setAttribute('slope', slope); f.setAttribute('intercept', intercept); });
+    gammaFuncs.forEach(f => f.setAttribute('exponent', gammaExp));
+
+    mapEl.style.filter = 'url(#levels-filter) saturate(' + sat + '%)';
+
+    levelBlackVal.textContent = black;
+    levelWhiteVal.textContent = white;
+    levelGammaVal.textContent = gamma.toFixed(2);
+    levelSatVal.textContent = sat + '%';
+  }
+
+  [levelBlack, levelWhite, levelGamma, levelSat].forEach(input => {
+    input.addEventListener('input', updateLevels);
+  });
+
+  document.getElementById('level-reset').addEventListener('click', () => {
+    levelBlack.value = 0;
+    levelWhite.value = 255;
+    levelGamma.value = 1;
+    levelSat.value = 100;
+    updateLevels();
   });
 </script>
 
