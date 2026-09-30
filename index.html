@@ -243,6 +243,44 @@
   .map-ctrl-btn:hover{ background: #f0efe9; }
   .map-ctrl-btn svg{ width: 15px; height:15px; }
 
+
+  /* Globo terráqueo (minimapa de ubicación) */
+  #globe{
+    position:absolute;
+    top:16px; right:16px;
+    z-index:10;
+    width:132px; height:132px;
+    padding:0; margin:0;
+    border:none; border-radius:50%;
+    background:transparent;
+    cursor:pointer;
+    filter: drop-shadow(0 4px 10px rgba(43,42,37,0.28));
+    transition: transform 0.15s ease;
+  }
+  #globe:hover{ transform: scale(1.04); }
+  #globe:active{ transform: scale(0.98); }
+  #globe svg{ width:100%; height:100%; display:block; overflow:visible; }
+  .globe-toast{
+    position:absolute;
+    left:50%; bottom:-22px;
+    transform: translateX(-50%);
+    white-space:nowrap;
+    font-size:11px;
+    padding:3px 8px;
+    border-radius:999px;
+    background: var(--accent);
+    color:#fff;
+    opacity:0;
+    pointer-events:none;
+    transition: opacity 0.15s ease;
+  }
+  .globe-toast.visible{ opacity:1; }
+  .globe-toast.err{ background:#b3492f; }
+  @media (max-width: 480px){
+    #globe{ top:auto; bottom:44px; width:96px; height:96px; }
+    .globe-toast{ bottom:auto; top:-22px; }
+  }
+
   #status{
     position:absolute;
     inset:0;
@@ -423,6 +461,11 @@
   </div>
 </div>
 
+<button type="button" id="globe" title="Copiar globo como SVG (CMYK) al portapapeles" aria-label="Globo terráqueo con el área visible. Clic para copiar como SVG CMYK">
+  <svg id="globe-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+  <span class="globe-toast" id="globe-toast"></span>
+</button>
+
 <svg width="0" height="0" style="position:absolute; overflow:hidden;" aria-hidden="true">
   <defs>
     <filter id="levels-filter" x="-20%" y="-20%" width="140%" height="140%">
@@ -441,6 +484,9 @@
 </svg>
 
 <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/d3-array@3.2.4/dist/d3-array.min.js"></script>
+<script src="https://unpkg.com/d3-geo@3.1.1/dist/d3-geo.min.js"></script>
+<script src="https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
 <script>
   if (typeof maplibregl === 'undefined') {
     document.getElementById('status').innerHTML =
@@ -819,6 +865,157 @@
     levelSat.value = 100;
     updateLevels();
   });
+
+  // --- Globo terráqueo: muestra en tiempo real el área visible del mapa ---
+  // Clic = copia el globo como SVG con colores CMYK al portapapeles.
+  // Colores CMYK (%) con su equivalente RGB aproximado para verlo en pantalla.
+  const GLOBE_COLORS = {
+    ocean:  { cmyk: [30, 0, 0, 0],   rgb: '#b3e1f7' },
+    land:   { cmyk: [0, 0, 0, 0],    rgb: '#ffffff' },
+    border: { cmyk: [0, 0, 0, 70],   rgb: '#58595b' },
+    frame:  { cmyk: [0, 0, 0, 100],  rgb: '#231f20' }
+  };
+  const globeBtn = document.getElementById('globe');
+  const globeSvg = document.getElementById('globe-svg');
+  const globeToast = document.getElementById('globe-toast');
+  const GLOBE_LIBS_OK = typeof d3 !== 'undefined' && typeof d3.geoOrthographic === 'function';
+  let globeLand = null;
+  let globeRaf = 0;
+  let globeToastTimer = null;
+
+  // Atributos de pintura de un trazado. Para pantalla: fill/stroke RGB.
+  // Para exportar: style con RGB de respaldo y luego device-cmyk() (SVG2). Los programas
+  // que no entienden device-cmyk ignoran la 2ª declaración y usan el RGB.
+  function globePaint(paint, asCmyk){
+    const props = Object.keys(paint);
+    if (!asCmyk) return props.map(prop => prop + '="' + GLOBE_COLORS[paint[prop]].rgb + '"').join(' ');
+    const decl = props.map(prop => {
+      const c = GLOBE_COLORS[paint[prop]];
+      const cmyk = c.cmyk.map(v => +(v / 100).toFixed(2)).join(' ');
+      return prop + ':' + c.rgb + ';' + prop + ':device-cmyk(' + cmyk + ')';
+    });
+    return 'style="' + decl.join(';') + '"';
+  }
+
+  // Anillo (lon/lat) del área visible: muestrea los bordes de la pantalla
+  function getViewRing(){
+    const canvas = map.getCanvas();
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return null;
+    const cLng = map.getCenter().lng;
+    const N = 16;
+    const edge = [];
+    for (let i = 0; i < N; i++) edge.push([w * i / N, 0]);
+    for (let i = 0; i < N; i++) edge.push([w, h * i / N]);
+    for (let i = 0; i < N; i++) edge.push([w * (1 - i / N), h]);
+    for (let i = 0; i < N; i++) edge.push([0, h * (1 - i / N)]);
+    edge.push(edge[0]);
+    const ring = [];
+    for (const pt of edge) {
+      const ll = map.unproject(pt);
+      // diferencia de longitud respecto al centro, acotada para no dar más de una vuelta
+      let dl = ((ll.lng - cLng + 540) % 360 + 360) % 360 - 180;
+      if (!isFinite(dl)) return null;
+      const lat = Math.max(-85.051129, Math.min(85.051129, ll.lat));
+      let lng = cLng + dl;
+      lng = ((lng + 540) % 360 + 360) % 360 - 180;
+      ring.push([lng, lat]);
+    }
+    return ring;
+  }
+
+  // Devuelve el contenido del SVG del globo. size = lado del lienzo, asCmyk = exportación
+  function buildGlobeMarkup(size, asCmyk){
+    const R = size * 0.48;
+    const k = R / 96;
+    const c = map.getCenter();
+    const proj = d3.geoOrthographic()
+      .scale(R)
+      .translate([size / 2, size / 2])
+      .rotate([-c.lng, -Math.max(-89, Math.min(89, c.lat)), 0])
+      .clipAngle(90)
+      .precision(asCmyk ? 0.1 : 0.5);
+    const path = d3.geoPath(proj).digits(asCmyk ? 2 : 1);
+    const sphere = path({ type: 'Sphere' });
+    const grid = path(d3.geoGraticule10());
+    const land = globeLand ? path(globeLand) : '';
+    const ring = getViewRing();
+    const frame = ring ? path({ type: 'LineString', coordinates: ring }) : '';
+    const sw = v => +(v * k).toFixed(2);
+    const P = paint => globePaint(paint, asCmyk);
+    return '' +
+      '<path id="oceano" d="' + sphere + '" ' + P({ fill: 'ocean' }) + '/>' +
+      '<path id="grilla" d="' + grid + '" fill="none" ' + P({ stroke: 'land' }) + ' stroke-width="' + sw(0.5) + '"/>' +
+      '<path id="continentes" d="' + land + '" ' + P({ fill: 'land', stroke: 'border' }) + ' stroke-width="' + sw(0.9) + '" stroke-linejoin="round"/>' +
+      '<path id="borde" d="' + sphere + '" fill="none" ' + P({ stroke: 'border' }) + ' stroke-width="' + sw(1.2) + '"/>' +
+      (frame ? '<path id="area-visible" d="' + frame + '" fill="none" ' + P({ stroke: 'frame' }) + ' stroke-width="' + sw(2.4) + '" stroke-linejoin="round"/>' : '');
+  }
+
+  function renderGlobe(){
+    globeRaf = 0;
+    if (!GLOBE_LIBS_OK) return;
+    globeSvg.innerHTML = buildGlobeMarkup(200, false);
+  }
+  function scheduleGlobe(){
+    if (!globeRaf) globeRaf = requestAnimationFrame(renderGlobe);
+  }
+
+  function buildGlobeExportSvg(){
+    const size = 512;
+    const cm = GLOBE_COLORS;
+    const legend = 'Océano C' + cm.ocean.cmyk[0] + ' | Bordes K' + cm.border.cmyk[3] + ' | Área visible K' + cm.frame.cmyk[3];
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">\n' +
+      '<!-- ' + legend + ' (CMYK %, sintaxis device-cmyk con RGB de respaldo) -->\n' +
+      buildGlobeMarkup(size, true).replace(/<path /g, '\n<path ') + '\n</svg>\n';
+  }
+
+  function showGlobeToast(msg, isErr){
+    globeToast.textContent = msg;
+    globeToast.classList.toggle('err', !!isErr);
+    globeToast.classList.add('visible');
+    clearTimeout(globeToastTimer);
+    globeToastTimer = setTimeout(() => globeToast.classList.remove('visible'), 1800);
+  }
+
+  async function copyGlobeSvg(){
+    try {
+      const svg = buildGlobeExportSvg();
+      try {
+        await navigator.clipboard.writeText(svg);
+      } catch (e) {
+        // Respaldo para contextos sin permiso de Clipboard API
+        const ta = document.createElement('textarea');
+        ta.value = svg;
+        ta.style.cssText = 'position:fixed;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        if (!ok) throw e;
+      }
+      showGlobeToast('SVG CMYK copiado');
+    } catch (err) {
+      console.error('Error al copiar globo:', err);
+      showGlobeToast('No se pudo copiar', true);
+    }
+  }
+
+  if (GLOBE_LIBS_OK) {
+    globeBtn.addEventListener('click', copyGlobeSvg);
+    map.on('move', scheduleGlobe);
+    map.on('resize', scheduleGlobe);
+    map.on('load', scheduleGlobe);
+    scheduleGlobe();
+    if (typeof topojson !== 'undefined') {
+      fetch('https://unpkg.com/world-atlas@2.0.2/land-110m.json')
+        .then(r => r.json())
+        .then(topo => { globeLand = topojson.feature(topo, topo.objects.land); scheduleGlobe(); })
+        .catch(err => console.warn('No se pudo cargar la geometría del globo:', err));
+    }
+  } else {
+    globeBtn.style.display = 'none';
+  }
 </script>
 
 </body>
